@@ -1,0 +1,224 @@
+#include <iostream>
+#include <vector>
+#include <cstdlib>
+#include <ctime>
+#include <thread>
+#include <chrono>
+
+#ifdef _WIN32
+#include <conio.h>
+#include <windows.h>
+#endif
+
+// Класс, отвечающий исключительно за логику игры
+class TetrisLogic {
+public:
+    static const int WIDTH = 10;
+    static const int HEIGHT = 20;
+
+private:
+    std::vector<std::vector<int>> board;
+    std::vector<std::vector<int>> currentPiece;
+    int currentX, currentY;
+    int score;
+    bool gameOver;
+
+    // 7 классических фигур тетриса (I, J, L, O, S, T, Z)
+    const std::vector<std::vector<std::vector<int>>> shapes = {
+        {{1, 1, 1, 1}},                         // I
+        {{1, 0, 0}, {1, 1, 1}},                 // J
+        {{0, 0, 1}, {1, 1, 1}},                 // L
+        {{1, 1}, {1, 1}},                       // O
+        {{0, 1, 1}, {1, 1, 0}},                 // S
+        {{0, 1, 0}, {1, 1, 1}},                 // T
+        {{1, 1, 0}, {0, 1, 1}}                  // Z
+    };
+
+public:
+    TetrisLogic() : board(HEIGHT, std::vector<int>(WIDTH, 0)), score(0), gameOver(false) {
+        std::srand(static_cast<unsigned>(std::time(nullptr)));
+        spawnPiece();
+    }
+
+    // Генерация новой случайной фигуры вверху поля
+    void spawnPiece() {
+        int index = std::rand() % shapes.size();
+        currentPiece = shapes[index];
+        currentX = WIDTH / 2 - currentPiece[0].size() / 2;
+        currentY = 0;
+
+        if (!isValidPosition(currentPiece, currentX, currentY)) {
+            gameOver = true;
+        }
+    }
+
+    // Проверка возможности разместить фигуру по заданным координатам
+    bool isValidPosition(const std::vector<std::vector<int>>& piece, int offsetX, int offsetY) const {
+        for (int y = 0; y < static_cast<int>(piece.size()); ++y) {
+            for (int x = 0; x < static_cast<int>(piece[y].size()); ++x) {
+                if (piece[y][x] == 0) continue;
+
+                int newX = offsetX + x;
+                int newY = offsetY + y;
+
+                // Проверка выхода за границы стакана
+                if (newX < 0 || newX >= WIDTH || newY < 0 || newY >= HEIGHT) {
+                    return false;
+                }
+                // Проверка столкновения с уже зафиксированными блоками
+                if (board[newY][newX] != 0) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // Движение по горизонтали (-1 влево, +1 вправо)
+    void moveHorizontal(int dx) {
+        if (isValidPosition(currentPiece, currentX + dx, currentY)) {
+            currentX += dx;
+        }
+    }
+
+    // Шаг падения вниз; возвращает false, если фигура приземлилась
+    bool moveDown() {
+        if (isValidPosition(currentPiece, currentX, currentY + 1)) {
+            currentY++;
+            return true;
+        }
+        else {
+            lockPiece();
+            clearLines();
+            spawnPiece();
+            return false;
+        }
+    }
+
+    // Поворот фигуры на 90 градусов по часовой стрелке
+    void rotate() {
+        int rows = currentPiece.size();
+        int cols = currentPiece[0].size();
+        std::vector<std::vector<int>> rotated(cols, std::vector<int>(rows, 0));
+
+        for (int y = 0; y < rows; ++y) {
+            for (int x = 0; x < cols; ++x) {
+                rotated[x][rows - 1 - y] = currentPiece[y][x];
+            }
+        }
+
+        if (isValidPosition(rotated, currentX, currentY)) {
+            currentPiece = rotated;
+        }
+    }
+
+    // Фиксация упавшей фигуры на игровом поле
+    void lockPiece() {
+        for (int y = 0; y < static_cast<int>(currentPiece.size()); ++y) {
+            for (int x = 0; x < static_cast<int>(currentPiece[y].size()); ++x) {
+                if (currentPiece[y][x] != 0) {
+                    board[currentY + y][currentX + x] = 1;
+                }
+            }
+        }
+    }
+
+    // Удаление заполненных горизонтальных линий и начисление очков
+    void clearLines() {
+        int linesCleared = 0;
+        for (int y = HEIGHT - 1; y >= 0; --y) {
+            bool isFull = true;
+            for (int x = 0; x < WIDTH; ++x) {
+                if (board[y][x] == 0) {
+                    isFull = false;
+                    break;
+                }
+            }
+
+            if (isFull) {
+                board.erase(board.begin() + y);
+                board.insert(board.begin(), std::vector<int>(WIDTH, 0));
+                linesCleared++;
+                y++; // Повторно проверяем ту же строку после сдвига
+            }
+        }
+
+        if (linesCleared > 0) {
+            score += linesCleared * 100 * linesCleared; // Бонус за комбо
+        }
+    }
+
+    // Геттеры для отрисовки состояния
+    bool isGameOver() const { return gameOver; }
+    int getScore() const { return score; }
+
+    // Формирует итоговую матрицу (поле + активная фигура) для рендера
+    std::vector<std::vector<int>> getRenderGrid() const {
+        std::vector<std::vector<int>> grid = board;
+        for (int y = 0; y < static_cast<int>(currentPiece.size()); ++y) {
+            for (int x = 0; x < static_cast<int>(currentPiece[y].size()); ++x) {
+                if (currentPiece[y][x] != 0) {
+                    grid[currentY + y][currentX + x] = 2; // 2 — активная фигура
+                }
+            }
+        }
+        return grid;
+    }
+};
+
+// Простая консольная отрисовка (для демонстрации работы логики)
+void renderConsole(const TetrisLogic& game) {
+#ifdef _WIN32
+    COORD cursorPosition = { 0, 0 };
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), cursorPosition);
+#else
+    std::cout << "\033[H\033[J";
+#endif
+
+    auto grid = game.getRenderGrid();
+    std::cout << "Score: " << game.getScore() << "\n";
+    std::cout << "+--------------------+\n";
+    for (int y = 0; y < TetrisLogic::HEIGHT; ++y) {
+        std::cout << "|";
+        for (int x = 0; x < TetrisLogic::WIDTH; ++x) {
+            if (grid[y][x] == 0) std::cout << "  ";
+            else if (grid[y][x] == 1) std::cout << "[]";
+            else std::cout << "##";
+        }
+        std::cout << "|\n";
+    }
+    std::cout << "+--------------------+\n";
+    std::cout << "Controls: A (Left), D (Right), W (Rotate), S (Drop), Q (Quit)\n";
+}
+
+int main() {
+    TetrisLogic game;
+    int tickCounter = 0;
+
+    while (!game.isGameOver()) {
+        renderConsole(game);
+
+#ifdef _WIN32
+        if (_kbhit()) {
+            char key = _getch();
+            if (key == 'a' || key == 'A') game.moveHorizontal(-1);
+            else if (key == 'd' || key == 'D') game.moveHorizontal(1);
+            else if (key == 'w' || key == 'W') game.rotate();
+            else if (key == 's' || key == 'S') game.moveDown();
+            else if (key == 'q' || key == 'Q') break;
+        }
+#endif
+
+        // Автоматическое падение фигуры каждые ~500 мс
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        tickCounter++;
+        if (tickCounter >= 10) {
+            game.moveDown();
+            tickCounter = 0;
+        }
+    }
+
+    renderConsole(game);
+    std::cout << "\nGAME OVER! Final Score: " << game.getScore() << "\n";
+    return 0;
+}
